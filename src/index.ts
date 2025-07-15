@@ -18,7 +18,11 @@ app.use(cors({
   origin: [
     process.env.FRONTEND_URL || 'http://localhost:5173',
     'http://localhost:8080',
-    'http://localhost:8081'
+    'http://localhost:8081',
+    'https://stayglobal.vercel.app',
+    'https://stay-global.vercel.app',
+    'https://stayglobal-git-main-apetorkus-projects.vercel.app',
+    /\.vercel\.app$/  // Allow all Vercel preview deployments
   ],
   credentials: true
 }));

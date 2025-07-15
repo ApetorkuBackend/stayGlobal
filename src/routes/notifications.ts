@@ -2,6 +2,8 @@ import express from 'express';
 import { requireAuth, requireRole } from '../middleware/auth';
 import {
   getNotifications,
+  getAdminNotifications,
+  getUserNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   getUnreadCount,
@@ -17,6 +19,12 @@ router.use(requireAuth);
 
 // Get notifications for current user
 router.get('/', getNotifications);
+
+// Get admin-specific notifications
+router.get('/admin', requireRole(['admin']), getAdminNotifications);
+
+// Get user-specific notifications (excluding admin types)
+router.get('/user', getUserNotifications);
 
 // Get unread notification count
 router.get('/unread-count', getUnreadCount);

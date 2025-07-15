@@ -26,6 +26,9 @@ export interface IBooking extends Document {
   checkInTime?: Date; // Actual check-in time
   checkOutTime?: Date; // Actual check-out time
   specialRequests?: string;
+  paymentReference?: string; // Paystack payment reference
+  paystackReference?: string; // Paystack reference for verification
+  ownerId?: string; // Owner Clerk ID for commission tracking
   createdAt: Date;
   updatedAt: Date;
 }
@@ -132,6 +135,21 @@ const BookingSchema: Schema = new Schema({
     type: String,
     trim: true,
     maxlength: [500, 'Special requests cannot exceed 500 characters']
+  },
+  paymentReference: {
+    type: String,
+    trim: true,
+    index: true
+  },
+  paystackReference: {
+    type: String,
+    trim: true,
+    index: true
+  },
+  ownerId: {
+    type: String,
+    trim: true,
+    index: true
   }
 }, {
   timestamps: true,

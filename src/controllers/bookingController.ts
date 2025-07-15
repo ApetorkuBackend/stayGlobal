@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import Booking, { IBooking } from '../models/Booking';
 import Apartment from '../models/Apartment';
+import User from '../models/User';
 import Commission from '../models/Commission';
 import { syncUserWithClerk } from '../utils/userUtils';
 import biometricService from '../services/biometricService';
@@ -163,11 +164,19 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Get user data
-    const user = await syncUserWithClerk(req.user.clerkId);
+    // Get user data from authenticated request (database validation)
+    const userClerkId = req.user?.clerkId;
+    if (!userClerkId) {
+      console.log('❌ No authenticated user');
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    // Validate user exists in database
+    const user = await User.findOne({ clerkId: userClerkId });
     if (!user) {
-      console.log('❌ User not found');
-      res.status(404).json({ error: 'User not found' });
+      console.log('❌ User not found in database:', userClerkId);
+      res.status(404).json({ error: 'User not found in database' });
       return;
     }
 
@@ -184,6 +193,65 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       res.status(400).json({ error: 'Apartment is not available' });
       return;
     }
+
+    // Check if apartment owner has payment account setup by looking up the owner
+    let owner;
+    try {
+      owner = await User.findOne({ clerkId: apartment.ownerId });
+      console.log('🔍 Looking for owner with clerkId:', apartment.ownerId);
+      console.log('🔍 Owner found:', !!owner);
+    } catch (error) {
+      console.error('❌ Error finding owner:', error);
+      res.status(500).json({
+        error: 'Database error',
+        message: 'Error looking up property owner information.'
+      });
+      return;
+    }
+
+    if (!owner) {
+      console.log('❌ Apartment owner not found for clerkId:', apartment.ownerId);
+      res.status(400).json({
+        error: 'Owner not found',
+        message: 'Property owner information not found. Please contact support.'
+      });
+      return;
+    }
+
+    // Check if owner is suspended
+    if (owner.status === 'suspended') {
+      console.log('❌ Owner is suspended');
+      res.status(400).json({
+        error: 'Property unavailable',
+        message: 'This property is temporarily unavailable for booking. Please try another property.'
+      });
+      return;
+    }
+
+    // Check if owner has verified payment account
+    if (!owner.paymentAccount?.isVerified) {
+      console.log('❌ Owner has no verified payment account');
+      res.status(400).json({
+        error: 'Payment account not configured',
+        message: 'This property owner has not set up their payment account yet. Bookings are not available for this property. Please try another property or contact the owner.'
+      });
+      return;
+    }
+
+    // For Paystack, ensure subaccount code exists
+    if (owner.paymentAccount.provider === 'paystack' && !owner.paymentAccount.accountDetails?.subaccountCode) {
+      console.log('❌ Paystack owner missing subaccount code');
+      res.status(400).json({
+        error: 'Payment configuration incomplete',
+        message: 'This property owner has incomplete payment setup. Bookings are not available for this property. Please try another property.'
+      });
+      return;
+    }
+
+    console.log('✅ Owner has verified payment account:', {
+      provider: owner.paymentAccount.provider,
+      hasSubaccount: !!owner.paymentAccount.accountDetails?.subaccountCode
+    });
 
     // Simple date validation - avoid timezone issues
     const checkInDate = new Date(checkIn + 'T12:00:00.000Z');
@@ -227,19 +295,33 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
     const randomStr = Math.random().toString(36).substr(2, 6).toUpperCase();
     const ticketCode = `BK${timestamp}${randomStr}`;
 
-    // Create booking with minimal required fields
+    // Extract payment information from request
+    const { paymentReference, paymentStatus } = req.body;
+
+    // Create booking with payment information (using database user data)
+    const guestName = user.fullName || `${user.firstName} ${user.lastName}`;
+
+    console.log('👤 Guest Information:');
+    console.log(`   Guest ID: ${user.clerkId}`);
+    console.log(`   Guest Name: ${guestName}`);
+    console.log(`   Guest Email: ${user.email}`);
+    console.log('🏠 Owner Information:');
+    console.log(`   Owner ID: ${apartment.ownerId}`);
+    console.log(`   Owner Name: ${apartment.ownerName}`);
+
     const bookingData = {
       apartmentId,
       guestId: user.clerkId,
-      guestName: user.fullName || `${user.firstName} ${user.lastName}`,
+      guestName,
       guestEmail: user.email,
       guestPhone: user.phone || '',
       checkIn: checkInDate,
       checkOut: checkOutDate,
       guests: Number(guests),
       totalAmount,
-      paymentMethod: 'none', // No payment required for now
-      paymentStatus: 'not_required',
+      paymentMethod: paymentReference ? 'paystack' : 'none',
+      paymentStatus: paymentStatus || (paymentReference ? 'completed' : 'not_required'),
+      paymentReference: paymentReference || null,
       bookingStatus: 'confirmed',
       ticketCode,
       specialRequests: specialRequests || ''
@@ -255,8 +337,17 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
     // Populate apartment details
     await booking.populate('apartmentId', 'title location images');
 
-    // Send notification to admin about new booking
+    // Send notifications about new booking
     try {
+      console.log('📧 Starting notification process for new booking...');
+      console.log(`   Booking ID: ${booking._id}`);
+      console.log(`   Guest: ${booking.guestName}`);
+      console.log(`   Apartment: ${apartment.title}`);
+      console.log(`   Owner ID: ${apartment.ownerId}`);
+      console.log(`   Owner Name: ${apartment.ownerName}`);
+
+      // Send notification to admin
+      console.log('📧 Sending notification to admin...');
       await NotificationService.createNewBookingNotification({
         bookingId: (booking._id as any).toString(),
         apartmentId: (apartment._id as any).toString(),
@@ -268,8 +359,35 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
         checkIn: booking.checkIn,
         checkOut: booking.checkOut
       });
+      console.log('✅ Admin notification sent successfully');
+
+      // Send notification to house owner
+      console.log('📧 Sending notification to house owner...');
+      console.log(`   Notification will be sent to owner: ${apartment.ownerId} (${apartment.ownerName})`);
+      console.log(`   About guest: ${booking.guestName} (${booking.guestId})`);
+      console.log(`   Apartment: ${apartment.title}`);
+
+      const ownerNotificationMessage = `${booking.guestName} has booked your apartment "${apartment.title}"${booking.roomNumber ? ` - Room ${booking.roomNumber}` : ''} from ${booking.checkIn.toLocaleDateString()} to ${booking.checkOut.toLocaleDateString()}`;
+      console.log(`   Message: ${ownerNotificationMessage}`);
+
+      await NotificationService.createNotification({
+        userId: apartment.ownerId,
+        type: 'new_booking',
+        title: '🎉 New Booking Received!',
+        message: ownerNotificationMessage,
+        bookingId: (booking._id as any).toString(),
+        apartmentId: (apartment._id as any).toString(),
+        guestName: booking.guestName,
+        roomNumber: booking.roomNumber,
+        priority: 'high'
+      });
+      console.log('✅ House owner notification sent successfully');
+
+      console.log('✅ All notifications sent successfully for new booking');
     } catch (notificationError) {
-      console.error('⚠️ Failed to send admin notification for new booking:', notificationError);
+      console.error('⚠️ Failed to send notifications for new booking:', notificationError);
+      console.error('   Error details:', (notificationError as Error).message);
+      console.error('   Stack trace:', (notificationError as Error).stack);
       // Don't fail the booking creation if notification fails
     }
 
@@ -282,30 +400,43 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       // Don't fail the booking creation if chat creation fails
     }
 
-    // Create commission record (5% of total amount)
-    try {
-      const commissionRate = 0.05; // 5%
-      const commissionAmount = totalAmount * commissionRate;
+    // Create commission record for bookings with successful payments
+    // Accept both 'completed' and 'paid' status, and create commission even without payment reference for tracking
+    const shouldCreateCommission = paymentStatus === 'completed' || paymentStatus === 'paid';
 
-      const commission = new Commission({
-        bookingId: booking._id,
-        apartmentId: booking.apartmentId,
-        ownerId: apartment.ownerId,
-        guestId: booking.guestId,
-        roomPrice: totalAmount,
-        commissionRate,
-        commissionAmount,
-        bookingDate: booking.createdAt,
-        checkInDate: booking.checkIn,
-        checkOutDate: booking.checkOut,
-        status: 'pending'
-      });
+    if (shouldCreateCommission && totalAmount > 0) {
+      try {
+        const commissionRate = 0.05; // 5%
+        const commissionAmount = totalAmount * commissionRate;
 
-      await commission.save();
-      console.log(`💰 Commission created: $${commissionAmount.toFixed(2)} (5% of $${totalAmount})`);
-    } catch (error) {
-      console.error('⚠️ Failed to create commission record:', error);
-      // Don't fail the booking creation if commission creation fails
+        const commission = new Commission({
+          bookingId: booking._id,
+          apartmentId: booking.apartmentId,
+          ownerId: apartment.ownerId,
+          guestId: booking.guestId,
+          roomPrice: totalAmount,
+          commissionRate,
+          commissionAmount,
+          bookingDate: booking.createdAt,
+          checkInDate: booking.checkIn,
+          checkOutDate: booking.checkOut,
+          paymentReference: paymentReference || `booking_${booking._id}`, // Use booking ID if no payment reference
+          status: paymentReference ? 'pending' : 'manual_review' // Different status for bookings without payment reference
+        });
+
+        await commission.save();
+        console.log(`💰 Commission created for ${paymentStatus} booking: GHS ${commissionAmount.toFixed(2)} (5% of GHS ${totalAmount})`);
+        console.log(`💳 Payment reference: ${paymentReference || 'booking_' + booking._id}`);
+        console.log(`📊 Commission status: ${commission.status}`);
+      } catch (error) {
+        console.error('⚠️ Failed to create commission record:', error);
+        // Don't fail the booking creation if commission creation fails
+      }
+    } else {
+      console.log('ℹ️ No commission created - booking has no payment or amount is 0');
+      console.log(`   Payment Status: ${paymentStatus || 'none'}`);
+      console.log(`   Payment Reference: ${paymentReference || 'none'}`);
+      console.log(`   Total Amount: ${totalAmount || 0}`);
     }
 
     res.status(201).json({
@@ -337,6 +468,7 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
 // Get user's bookings
 export const getMyBookings = async (req: Request, res: Response): Promise<void> => {
   try {
+    console.log('📋 Getting bookings for user:', req.user.clerkId);
     const { page = 1, limit = 10, status } = req.query;
 
     const pageNum = Math.max(1, Number(page));
@@ -348,6 +480,8 @@ export const getMyBookings = async (req: Request, res: Response): Promise<void> 
       filter.bookingStatus = status;
     }
 
+    console.log('🔍 Booking filter:', filter);
+
     const [bookings, total] = await Promise.all([
       Booking.find(filter)
         .populate('apartmentId', 'title location images price')
@@ -357,6 +491,18 @@ export const getMyBookings = async (req: Request, res: Response): Promise<void> 
         .lean(),
       Booking.countDocuments(filter)
     ]);
+
+    console.log(`📊 Found ${bookings.length} bookings for user (total: ${total})`);
+    if (bookings.length > 0) {
+      console.log('📋 Sample booking:', {
+        id: bookings[0]._id,
+        guestId: bookings[0].guestId,
+        apartmentId: bookings[0].apartmentId,
+        paymentStatus: bookings[0].paymentStatus,
+        bookingStatus: bookings[0].bookingStatus,
+        createdAt: bookings[0].createdAt
+      });
+    }
 
     res.json({
       bookings,
@@ -368,7 +514,7 @@ export const getMyBookings = async (req: Request, res: Response): Promise<void> 
       }
     });
   } catch (error) {
-    console.error('Error fetching user bookings:', error);
+    console.error('❌ Error fetching user bookings:', error);
     res.status(500).json({ error: 'Failed to fetch your bookings' });
   }
 };
@@ -500,6 +646,8 @@ export const getOwnerBookings = async (req: Request, res: Response): Promise<voi
       filter.bookingStatus = status;
     }
 
+    console.log('🔍 Booking filter for owner:', filter);
+
     // Get bookings for all user's apartments
     const [bookings, total] = await Promise.all([
       Booking.find(filter)
@@ -510,6 +658,18 @@ export const getOwnerBookings = async (req: Request, res: Response): Promise<voi
         .lean(),
       Booking.countDocuments(filter)
     ]);
+
+    console.log(`📊 Found ${bookings.length} bookings for owner (total: ${total})`);
+    if (bookings.length > 0) {
+      console.log('📋 Sample owner booking:', {
+        id: bookings[0]._id,
+        guestId: bookings[0].guestId,
+        apartmentId: bookings[0].apartmentId,
+        paymentStatus: bookings[0].paymentStatus,
+        bookingStatus: bookings[0].bookingStatus,
+        createdAt: bookings[0].createdAt
+      });
+    }
 
     res.json({
       bookings,
@@ -818,6 +978,24 @@ export const createSecureBooking = async (req: Request, res: Response): Promise<
 
     if (!apartment.isActive) {
       res.status(400).json({ error: 'Apartment is not available' });
+      return;
+    }
+
+    // Check if apartment owner is suspended
+    const owner = await User.findOne({ clerkId: apartment.ownerId });
+    if (!owner) {
+      res.status(400).json({
+        error: 'Owner not found',
+        message: 'Property owner information not found. Please contact support.'
+      });
+      return;
+    }
+
+    if (owner.status === 'suspended') {
+      res.status(400).json({
+        error: 'Property unavailable',
+        message: 'This property is temporarily unavailable for booking. Please try another property.'
+      });
       return;
     }
 

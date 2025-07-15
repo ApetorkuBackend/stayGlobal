@@ -9,6 +9,7 @@
     "dev": "nodemon src/index.ts",
     "seed": "npx ts-node src/seed.ts",
     "seed:bookings": "npx ts-node src/seedBookings.ts",
+    "migrate:payment-accounts": "npx ts-node src/scripts/updateApartmentPaymentAccounts.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -45,5 +46,14 @@
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ApetorkuBackend/stayGlobal.git"
+  },
+  "types": "./dist/index.d.ts",
+  "bugs": {
+    "url": "https://github.com/ApetorkuBackend/stayGlobal/issues"
+  },
+  "homepage": "https://github.com/ApetorkuBackend/stayGlobal#readme"
 }

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Apartment, { IApartment } from '../models/Apartment';
+import User from '../models/User';
 import { syncUserWithClerk } from '../utils/userUtils';
 import NotificationService from '../services/notificationService';
 
@@ -20,8 +21,15 @@ export const getApartments = async (req: Request, res: Response) => {
       sortOrder = 'desc'
     } = req.query;
 
-    // Build filter object
-    const filter: Record<string, unknown> = { isActive: true };
+    // Get active (non-suspended) owners
+    const activeOwners = await User.find({ status: 'active' }).distinct('clerkId');
+    console.log(`🔍 Found ${activeOwners.length} active owners`);
+
+    // Build filter object - only show apartments from active owners
+    const filter: Record<string, unknown> = {
+      isActive: true,
+      ownerId: { $in: activeOwners }
+    };
 
     if (country) filter['location.country'] = new RegExp(country as string, 'i');
     if (region) filter['location.region'] = new RegExp(region as string, 'i');
@@ -56,6 +64,15 @@ export const getApartments = async (req: Request, res: Response) => {
         .lean(),
       Apartment.countDocuments(filter)
     ]);
+
+    // Debug: Log apartment payment account data
+    console.log('🏠 Apartments fetched:', apartments.length);
+    apartments.forEach(apt => {
+      console.log(`🏠 ${apt.title}: Payment Account = ${apt.ownerPaymentAccount ? 'Present' : 'Missing'}`);
+      if (apt.ownerPaymentAccount) {
+        console.log(`   Provider: ${apt.ownerPaymentAccount.provider}, Subaccount: ${apt.ownerPaymentAccount.subaccountCode || 'N/A'}`);
+      }
+    });
 
     res.json({
       apartments,

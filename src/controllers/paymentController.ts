@@ -5,6 +5,7 @@ import Apartment from '../models/Apartment';
 import User from '../models/User';
 import paystackService from '../services/paystackService';
 import { syncUserWithClerk } from '../utils/userUtils';
+import { PaymentMetadata, PaymentData } from '../types/payment';
 
 // Initialize payment for a booking
 export const initializePayment = async (req: Request, res: Response): Promise<void> => {
@@ -228,11 +229,62 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       payment.completedAt = new Date();
       await payment.save();
 
-      // Update booking payment status
-      const booking = await Booking.findById(payment.bookingId);
-      if (booking) {
-        booking.paymentStatus = 'paid';
-        await booking.save();
+      // Handle booking creation or update
+      let booking = null;
+
+      if (payment.bookingId) {
+        // Update existing booking
+        booking = await Booking.findById(payment.bookingId);
+        if (booking) {
+          booking.paymentStatus = 'paid';
+          booking.bookingStatus = 'confirmed';
+          await booking.save();
+          console.log('✅ Updated existing booking:', booking._id);
+        }
+      } else if (payment.metadata && (payment.metadata as PaymentMetadata).apartmentId) {
+        // Create booking from payment metadata (payment-first flow)
+        console.log('💳 Creating booking after successful payment...');
+
+        const Apartment = require('../models/Apartment').default;
+        const User = require('../models/User').default;
+        const metadata = payment.metadata as PaymentMetadata;
+
+        const apartment = await Apartment.findById(metadata.apartmentId);
+        const user = await User.findOne({ clerkId: payment.payerId });
+
+        if (apartment && user) {
+          // Generate unique ticket code
+          const timestamp = Date.now();
+          const randomStr = Math.random().toString(36).substr(2, 6).toUpperCase();
+          const ticketCode = `BK${timestamp}${randomStr}`;
+
+          // Create booking with payment information
+          const Booking = require('../models/Booking').default;
+          booking = new Booking({
+            apartmentId: metadata.apartmentId,
+            guestId: payment.payerId,
+            guestName: user.fullName || `${user.firstName} ${user.lastName}`,
+            guestEmail: user.email,
+            guestPhone: user.phone || '',
+            checkIn: new Date(metadata.checkIn!),
+            checkOut: new Date(metadata.checkOut!),
+            guests: metadata.guests || 1,
+            totalAmount: payment.amount,
+            paymentMethod: payment.paymentMethod,
+            paymentStatus: 'paid',
+            paymentReference: reference,
+            bookingStatus: 'confirmed',
+            ticketCode,
+            specialRequests: ''
+          });
+
+          await booking.save();
+          console.log('✅ Created booking after payment:', booking._id);
+
+          // Update payment with booking ID
+          payment.bookingId = booking._id;
+          await payment.save();
+        }
       }
 
       res.json({
@@ -287,6 +339,88 @@ export const getPayment = async (req: Request, res: Response): Promise<void> => 
 };
 
 // Get user's payments (as payer or payee)
+// Verify split payment for booking
+export const verifySplitPayment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { reference, bookingId } = req.body;
+
+    if (!reference) {
+      res.status(400).json({ error: 'Payment reference is required' });
+      return;
+    }
+
+    console.log('🔍 Verifying split payment:', { reference, bookingId });
+
+    // Verify payment with Paystack
+    const verification = await paystackService.verifyPayment(reference);
+
+    if (!verification.status || verification.data.status !== 'success') {
+      res.status(400).json({
+        error: 'Payment verification failed',
+        details: verification.data.gateway_response
+      });
+      return;
+    }
+
+    const paymentData = verification.data;
+    console.log('✅ Payment verified successfully:', {
+      reference: paymentData.reference,
+      amount: paymentData.amount,
+      status: paymentData.status
+    });
+
+    // If bookingId is provided, update the booking status
+    if (bookingId) {
+      const booking = await Booking.findById(bookingId);
+      if (booking) {
+        booking.paymentStatus = 'paid';
+        booking.bookingStatus = 'confirmed';
+        booking.paystackReference = reference;
+        await booking.save();
+
+        console.log('✅ Booking updated:', bookingId);
+
+        // Create commission record for admin
+        const totalAmountInGHS = paymentData.amount / 100; // Convert from kobo to GHS
+        const commissionAmount = totalAmountInGHS * 0.10; // 10% commission
+
+        const Commission = require('../models/Commission').default;
+        await Commission.create({
+          bookingId: booking._id,
+          apartmentId: booking.apartmentId,
+          ownerId: booking.ownerId,
+          amount: commissionAmount,
+          percentage: 10,
+          status: 'earned',
+          paymentReference: reference,
+          createdAt: new Date()
+        });
+
+        console.log('✅ Commission created:', commissionAmount);
+      }
+    }
+
+    res.json({
+      message: 'Payment verified successfully',
+      payment: {
+        reference: paymentData.reference,
+        amount: paymentData.amount / 100, // Convert to GHS
+        status: paymentData.status,
+        paidAt: paymentData.paid_at,
+        channel: paymentData.channel,
+        currency: paymentData.currency
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error verifying split payment:', error);
+    res.status(500).json({
+      error: 'Payment verification failed',
+      details: (error as Error).message
+    });
+  }
+};
+
 export const getUserPayments = async (req: Request, res: Response): Promise<void> => {
   try {
     const { page = 1, limit = 10, type = 'all' } = req.query;

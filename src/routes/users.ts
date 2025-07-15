@@ -5,6 +5,58 @@ import User, { IUser } from '../models/User';
 
 const router = express.Router();
 
+// Get current user basic info (for role-based routing)
+router.get('/me', requireAuth, async (req, res): Promise<void> => {
+  try {
+    const reqUser = (req as any).user;
+    res.json({
+      role: reqUser.role,
+      email: reqUser.email,
+      firstName: reqUser.firstName,
+      lastName: reqUser.lastName,
+      clerkId: reqUser.clerkId
+    });
+  } catch (error) {
+    console.error('Error fetching user info:', error);
+    res.status(500).json({ error: 'Failed to fetch user info' });
+  }
+});
+
+// Update user role (for role selection during sign-up)
+router.patch('/update-role', requireAuth, async (req, res): Promise<void> => {
+  try {
+    const { role } = req.body;
+    const reqUser = (req as any).user;
+
+    // Validate role
+    if (!role || !['guest', 'owner', 'admin'].includes(role)) {
+      res.status(400).json({ error: 'Invalid role. Must be guest, owner, or admin' });
+      return;
+    }
+
+    // Update user role in database
+    const updatedUser = await User.findOneAndUpdate(
+      { clerkId: reqUser.clerkId },
+      { role },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    console.log(`✅ User role updated: ${reqUser.email} -> ${role}`);
+    res.json({
+      message: 'Role updated successfully',
+      role: updatedUser.role
+    });
+  } catch (error) {
+    console.error('Error updating user role:', error);
+    res.status(500).json({ error: 'Failed to update user role' });
+  }
+});
+
 // Get current user profile
 router.get('/profile', requireAuth, async (req, res): Promise<void> => {
   try {

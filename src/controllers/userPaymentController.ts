@@ -36,12 +36,12 @@ export const setupPaystackAccount = async (req: Request, res: Response): Promise
 
       const accountName = accountVerification.data.account_name;
 
-      // Create Paystack subaccount
+      // Create Paystack subaccount (90% to owner, 10% to platform)
       const subaccountData = {
         business_name: businessName,
         settlement_bank: bankCode,
         account_number: accountNumber,
-        percentage_charge: 5, // 5% platform fee
+        percentage_charge: 90, // 90% goes to owner, 10% to platform
         description: description || `Subaccount for ${businessName}`,
         primary_contact_email: user.email,
         primary_contact_name: user.fullName || user.email,

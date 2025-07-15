@@ -116,6 +116,69 @@ export class NotificationService {
     }
   }
 
+  // Get notifications by type for a user
+  static async getNotificationsByType(userId: string, types: string[], limit: number = 20): Promise<INotification[]> {
+    try {
+      console.log(`📬 Fetching notifications for user: ${userId}, types: ${types.join(', ')}, limit: ${limit}`);
+
+      const notifications = await Notification.find({
+        userId,
+        type: { $in: types }
+      })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate({
+          path: 'bookingId',
+          select: 'ticketCode guestName',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'apartmentId',
+          select: 'title location',
+          options: { strictPopulate: false }
+        });
+
+      console.log(`✅ Found ${notifications.length} notifications of types [${types.join(', ')}] for user ${userId}`);
+      return notifications;
+    } catch (error) {
+      console.error('❌ Error fetching notifications by type:', error);
+      throw error;
+    }
+  }
+
+  // Get admin notifications for a specific admin user
+  static async getAdminNotificationsForUser(userId: string, types: string[], limit: number = 20): Promise<INotification[]> {
+    try {
+      console.log(`📬 Fetching admin notifications for user: ${userId}, types: ${types.join(', ')}, limit: ${limit}`);
+
+      // Get notifications for both the current user and the system admin
+      const notifications = await Notification.find({
+        $or: [
+          { userId: userId, type: { $in: types } },
+          { userId: 'admin_system_user', type: { $in: types } }
+        ]
+      })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate({
+          path: 'bookingId',
+          select: 'ticketCode guestName',
+          options: { strictPopulate: false }
+        })
+        .populate({
+          path: 'apartmentId',
+          select: 'title location',
+          options: { strictPopulate: false }
+        });
+
+      console.log(`✅ Found ${notifications.length} admin notifications for user ${userId}`);
+      return notifications;
+    } catch (error) {
+      console.error('❌ Error fetching admin notifications:', error);
+      throw error;
+    }
+  }
+
   // Mark notification as read
   static async markAsRead(notificationId: string, userId: string): Promise<INotification | null> {
     try {
@@ -186,13 +249,34 @@ export class NotificationService {
   // Get admin user ID
   static async getAdminUserId(): Promise<string | null> {
     try {
-      const adminUser = await User.findOne({
-        email: 'bamenorhu8@gmail.com',
-        role: 'admin'
+      let adminUser = await User.findOne({
+        email: 'bamenorhu8@gmail.com'
       });
-      return adminUser?.clerkId || null;
+
+      // If admin user doesn't exist, create one
+      if (!adminUser) {
+        console.log('🔧 Admin user not found, creating admin user...');
+        adminUser = new User({
+          clerkId: 'admin_system_user',
+          email: 'bamenorhu8@gmail.com',
+          fullName: 'System Admin',
+          role: 'admin',
+          isVerified: true
+        });
+        await adminUser.save();
+        console.log('✅ Admin user created successfully');
+      }
+
+      // Ensure user has admin role
+      if (adminUser.role !== 'admin') {
+        adminUser.role = 'admin';
+        await adminUser.save();
+        console.log('✅ User role updated to admin');
+      }
+
+      return adminUser.clerkId;
     } catch (error) {
-      console.error('❌ Error getting admin user ID:', error);
+      console.error('❌ Error getting/creating admin user ID:', error);
       return null;
     }
   }

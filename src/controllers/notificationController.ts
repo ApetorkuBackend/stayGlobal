@@ -34,6 +34,73 @@ export const getNotifications = async (req: Request, res: Response): Promise<voi
   }
 };
 
+// Get admin-specific notifications
+export const getAdminNotifications = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.clerkId;
+    if (!userId) {
+      console.error('❌ No user ID found in request');
+      res.status(401).json({ error: 'User not authenticated' });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 20;
+    console.log(`📬 Fetching admin notifications for user: ${userId}, limit: ${limit}`);
+
+    // Admin notification types
+    const adminTypes = ['system_alert', 'new_apartment', 'new_booking', 'verification_submitted', 'admin_message', 'payment_issue'];
+
+    // Get notifications for both the current admin user and the system admin
+    const notifications = await NotificationService.getAdminNotificationsForUser(userId, adminTypes, limit);
+
+    console.log(`✅ Successfully fetched ${notifications.length} admin notifications`);
+    res.json({
+      message: 'Admin notifications retrieved successfully',
+      notifications,
+      count: notifications.length
+    });
+  } catch (error) {
+    console.error('❌ Error fetching admin notifications:', error);
+    res.status(500).json({
+      error: 'Failed to fetch admin notifications',
+      details: (error as Error).message
+    });
+  }
+};
+
+// Get user-specific notifications (excluding admin types)
+export const getUserNotifications = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.clerkId;
+    if (!userId) {
+      console.error('❌ No user ID found in request');
+      res.status(401).json({ error: 'User not authenticated' });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 20;
+    console.log(`📬 Fetching user notifications for user: ${userId}, limit: ${limit}`);
+
+    // User notification types (including new_booking for house owners)
+    const userTypes = ['auto_checkout', 'booking_reminder', 'payment_received', 'new_message', 'checkout_reminder', 'new_booking'];
+
+    const notifications = await NotificationService.getNotificationsByType(userId, userTypes, limit);
+
+    console.log(`✅ Successfully fetched ${notifications.length} user notifications`);
+    res.json({
+      message: 'User notifications retrieved successfully',
+      notifications,
+      count: notifications.length
+    });
+  } catch (error) {
+    console.error('❌ Error fetching user notifications:', error);
+    res.status(500).json({
+      error: 'Failed to fetch user notifications',
+      details: (error as Error).message
+    });
+  }
+};
+
 // Mark a notification as read
 export const markNotificationAsRead = async (req: Request, res: Response): Promise<void> => {
   try {

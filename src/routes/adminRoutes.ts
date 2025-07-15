@@ -8,7 +8,9 @@ import {
   getAllApartments,
   updateApartmentStatus,
   getAllOwners,
-  updateOwnerStatus
+  updateOwnerStatus,
+  updateApartmentPaymentAccounts,
+  migrateCommissions
 } from '../controllers/adminController';
 
 const router = express.Router();
@@ -365,6 +367,10 @@ router.patch('/apartments/:apartmentId/status', updateApartmentStatus as any);
 router.get('/owners', getAllOwners as any);
 router.patch('/owners/:ownerId/status', updateOwnerStatus as any);
 
+// Maintenance operations
+router.post('/apartments/update-payment-accounts', updateApartmentPaymentAccounts as any);
 
+// Commission migration
+router.post('/migrate-commissions', migrateCommissions as any);
 
 export default router;

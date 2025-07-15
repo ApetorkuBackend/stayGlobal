@@ -23,7 +23,7 @@ export const createUserFromClerk = async (clerkUserId: string): Promise<IUser> =
       firstName,
       lastName,
       avatar,
-      role: 'owner', // Default role - allow users to list apartments
+      role: 'guest', // Default role - users can select their role later
       isActive: true
     });
 
@@ -64,12 +64,6 @@ export const syncUserWithClerk = async (clerkUserId: string): Promise<IUser> => 
         user.firstName = clerkUser.firstName || user.firstName;
         user.lastName = clerkUser.lastName || user.lastName;
         user.avatar = clerkUser.imageUrl || user.avatar;
-
-        // Update role to owner if still guest (for existing users)
-        if (user.role === 'guest') {
-          console.log('🔄 Upgrading user role from guest to owner');
-          user.role = 'owner';
-        }
 
         await user.save();
         console.log('✅ User updated successfully');

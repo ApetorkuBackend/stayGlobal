@@ -17,12 +17,33 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 
     // Find user in our database
-    const user = await User.findOne({ clerkId: userId });
+    let user = await User.findOne({ clerkId: userId });
 
+    if (!user) {
+      console.log('👤 User not found in database, creating new user for Clerk ID:', userId);
+
+      // Import syncUserWithClerk here to avoid circular dependency
+      const { syncUserWithClerk } = await import('../utils/userUtils');
+
+      try {
+        // Create user from Clerk data
+        user = await syncUserWithClerk(userId) as any;
+        console.log('✅ New user created successfully:', user?._id);
+      } catch (syncError) {
+        console.error('❌ Failed to create user from Clerk:', syncError);
+        res.status(401).json({
+          error: 'User creation failed',
+          message: 'Failed to create user profile. Please try again.'
+        });
+        return;
+      }
+    }
+
+    // Ensure user exists before proceeding
     if (!user) {
       res.status(401).json({
         error: 'User not found',
-        message: 'Please complete your profile setup'
+        message: 'User could not be found or created'
       });
       return;
     }

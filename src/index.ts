@@ -14,33 +14,14 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(helmet());
-// CORS configuration - Allow all origins for now (production fix)
 app.use(cors({
-  origin: true, // Allow all origins
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-Forwarded-For'],
-  exposedHeaders: ['Content-Length', 'X-Total-Count'],
-  maxAge: 86400, // 24 hours
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'http://localhost:8080',
+    'http://localhost:8081'
+  ],
+  credentials: true
 }));
-
-// Additional CORS headers for preflight requests
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, Accept, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
-
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-
-  next();
-});
 app.use(morgan('combined'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -65,6 +46,7 @@ import bookingRoutes from './routes/bookings';
 import userRoutes from './routes/users';
 import paymentRoutes from './routes/paymentRoutes';
 import userPaymentRoutes from './routes/userPaymentRoutes';
+import paystackRoutes from './routes/paystackRoutes';
 import identityVerificationRoutes from './routes/identityVerificationRoutes';
 import notificationRoutes from './routes/notifications';
 import chatRoutes from './routes/chats';
@@ -89,6 +71,7 @@ app.use('/api/bookings', (req, res, next) => {
 app.use('/api/users', userRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/user-payments', userPaymentRoutes);
+app.use('/api/paystack', paystackRoutes);
 app.use('/api/identity-verification', identityVerificationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/chats', chatRoutes);

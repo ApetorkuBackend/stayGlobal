@@ -54,6 +54,8 @@ interface PaystackVerifyResponse {
   };
 }
 
+
+
 interface PaystackMobileMoneyChargeResponse {
   status: boolean;
   message: string;
@@ -147,6 +149,11 @@ class PaystackService {
       console.error('Paystack verify error:', error.response?.data || error.message);
       throw new Error(`Failed to verify payment: ${error.response?.data?.message || error.message}`);
     }
+  }
+
+  // Alias for verifyTransaction to maintain compatibility
+  async verifyPayment(reference: string): Promise<PaystackVerifyResponse> {
+    return this.verifyTransaction(reference);
   }
 
   async createSubaccount(data: PaystackSubaccountData): Promise<PaystackSubaccountResponse> {
@@ -281,6 +288,39 @@ class PaystackService {
   // Calculate owner amount after platform fee
   calculateOwnerAmount(totalAmount: number, platformFee: number): number {
     return totalAmount - platformFee;
+  }
+
+  // Initialize split payment (90% to owner, 10% to platform)
+  async initializeSplitPayment(data: {
+    email: string;
+    amount: number; // in kobo
+    subaccount: string;
+    metadata?: any;
+  }) {
+    try {
+      console.log('💳 Initializing split payment:', data);
+
+      const paymentData = {
+        email: data.email,
+        amount: data.amount,
+        subaccount: data.subaccount,
+        transaction_charge: Math.round(data.amount * 0.10), // 10% platform fee
+        bearer: 'account', // Main account bears the transaction fee
+        metadata: data.metadata || {}
+      };
+
+      const response = await axios.post(
+        `${PAYSTACK_BASE_URL}/transaction/initialize`,
+        paymentData,
+        { headers: this.headers }
+      );
+
+      console.log('✅ Split payment initialized:', response.data.data.reference);
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error initializing split payment:', error.response?.data || error.message);
+      throw new Error(error.response?.data?.message || 'Failed to initialize split payment');
+    }
   }
 }
 

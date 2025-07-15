@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth';
 import {
   initializePayment,
   verifyPayment,
+  verifySplitPayment,
   getPayment,
   getUserPayments
 } from '../controllers/paymentController';
@@ -15,8 +16,11 @@ router.use(requireAuth);
 // Initialize payment for a booking
 router.post('/initialize', initializePayment);
 
-// Verify payment
+// Verify payment (legacy)
 router.get('/verify/:reference', verifyPayment);
+
+// Verify split payment for bookings
+router.post('/verify', verifySplitPayment);
 
 // Get specific payment details
 router.get('/:id', getPayment);

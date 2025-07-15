@@ -11,7 +11,7 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
-# Build output
+# Build outputs
 dist/
 build/
 
@@ -69,22 +69,6 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 
-# Temporary folders
-tmp/
-temp/
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Debug files
-debug/
-*.debug
-
-# Test files
-test-results/
-coverage/
-
-# Railway files
-.railway/
+# Temporary files
+*.tmp
+*.temp

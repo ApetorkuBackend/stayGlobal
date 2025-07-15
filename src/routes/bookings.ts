@@ -16,6 +16,7 @@ import {
 import { requireAuth, requireRole } from '../middleware/auth';
 import { validateBooking } from '../middleware/validation';
 import { requireIdentityVerification, requireBiometricVerification } from '../middleware/verification';
+import Booking from '../models/Booking';
 
 const router = express.Router();
 
@@ -34,15 +35,15 @@ router.post('/secure',
   validateBooking,
   createSecureBooking
 ); // New secure booking with biometric verification
-router.get('/my', getMyBookings);
-router.patch('/:id/cancel', cancelBooking);
+router.get('/my', requireAuth, getMyBookings);
+router.patch('/:id/cancel', requireAuth, cancelBooking);
 
 // Owner routes (specific routes must come before /:id)
-router.get('/owner', requireRole(['owner', 'admin']), getOwnerBookings); // Get all bookings for owner's properties
-router.get('/ticket/:ticketCode', requireRole(['owner', 'admin']), getBookingByTicketCode);
-router.get('/apartment/:apartmentId', requireRole(['owner', 'admin']), getApartmentBookings);
-router.get('/apartment/:apartmentId/rooms', requireRole(['owner', 'admin']), getRoomAvailability);
-router.patch('/:id/status', requireRole(['owner', 'admin']), updateBookingStatus);
+router.get('/owner', requireAuth, requireRole(['owner', 'admin']), getOwnerBookings); // Get all bookings for owner's properties
+router.get('/ticket/:ticketCode', requireAuth, requireRole(['owner', 'admin']), getBookingByTicketCode);
+router.get('/apartment/:apartmentId', requireAuth, requireRole(['owner', 'admin']), getApartmentBookings);
+router.get('/apartment/:apartmentId/rooms', requireAuth, requireRole(['owner', 'admin']), getRoomAvailability);
+router.patch('/:id/status', requireAuth, requireRole(['owner', 'admin']), updateBookingStatus);
 
 // Test route for debugging
 router.get('/test-checkout/:id', (req, res) => {
@@ -54,10 +55,10 @@ router.get('/test-checkout/:id', (req, res) => {
 });
 
 // Specific action routes (must come before generic /:id route)
-router.post('/:id/checkout', selfCheckout); // Self-checkout for renters
-router.patch('/:id/payment', requireRole(['admin']), updatePaymentStatus); // Admin payment updates
+router.post('/:id/checkout', requireAuth, selfCheckout); // Self-checkout for renters
+router.patch('/:id/payment', requireAuth, requireRole(['admin']), updatePaymentStatus); // Admin payment updates
 
 // Generic ID route (must come last)
-router.get('/:id', getBookingById);
+router.get('/:id', requireAuth, getBookingById);
 
 export default router;

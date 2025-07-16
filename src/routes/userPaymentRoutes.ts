@@ -11,25 +11,25 @@ import {
 
 const router = express.Router();
 
-// All routes require authentication
+// Get list of banks (public endpoint for payment setup)
+router.get('/banks', getBanks);
+
+// Verify account number (public endpoint for payment setup)
+router.post('/verify-account', verifyAccountNumber);
+
+// All other routes require authentication
 router.use(requireAuth);
 
 // Get user's payment account
 router.get('/account', getPaymentAccount);
 
-// Set up Paystack account (owners only)
-router.post('/account/paystack', requireRole(['owner']), setupPaystackAccount);
+// Set up Paystack account (allow any authenticated user, they become owners after setup)
+router.post('/account/paystack', setupPaystackAccount);
 
-// Set up Mobile Money account (owners only)
-router.post('/account/momo', requireRole(['owner']), setupMomoAccount);
+// Set up Mobile Money account (allow any authenticated user, they become owners after setup)
+router.post('/account/momo', setupMomoAccount);
 
 // Remove payment account (owners only)
 router.delete('/account', requireRole(['owner']), removePaymentAccount);
-
-// Get list of banks
-router.get('/banks', getBanks);
-
-// Verify account number
-router.post('/verify-account', verifyAccountNumber);
 
 export default router;

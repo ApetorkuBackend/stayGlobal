@@ -19,11 +19,7 @@ export const setupPaystackAccount = async (req: Request, res: Response): Promise
     // Get user info
     const user = await syncUserWithClerk(req.user.clerkId);
 
-    // Only owners can set up payment accounts
-    if (user.role !== 'owner') {
-      res.status(403).json({ error: 'Only property owners can set up payment accounts' });
-      return;
-    }
+    // Allow any authenticated user to set up payment accounts (they become owners after setup)
 
     // Verify account number with bank
     try {
@@ -59,7 +55,7 @@ export const setupPaystackAccount = async (req: Request, res: Response): Promise
         return;
       }
 
-      // Update user with payment account details
+      // Update user with payment account details and set role to owner
       const updatedUser = await User.findOneAndUpdate(
         { clerkId: user.clerkId },
         {
@@ -73,7 +69,8 @@ export const setupPaystackAccount = async (req: Request, res: Response): Promise
             },
             isVerified: true,
             createdAt: new Date()
-          }
+          },
+          role: 'owner' // Automatically set role to owner after payment setup
         },
         { new: true }
       );
@@ -122,13 +119,7 @@ export const setupMomoAccount = async (req: Request, res: Response): Promise<voi
     // Get user info
     const user = await syncUserWithClerk(req.user.clerkId);
 
-    // Only owners can set up payment accounts
-    if (user.role !== 'owner') {
-      res.status(403).json({ error: 'Only property owners can set up payment accounts' });
-      return;
-    }
-
-    // Update user with mobile money account details
+    // Update user with mobile money account details and set role to owner
     const updatedUser = await User.findOneAndUpdate(
       { clerkId: user.clerkId },
       {
@@ -140,7 +131,8 @@ export const setupMomoAccount = async (req: Request, res: Response): Promise<voi
           },
           isVerified: true, // For now, we'll mark as verified immediately
           createdAt: new Date()
-        }
+        },
+        role: 'owner' // Automatically set role to owner after payment setup
       },
       { new: true }
     );

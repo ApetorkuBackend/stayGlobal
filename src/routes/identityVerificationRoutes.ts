@@ -28,8 +28,9 @@ router.use((req, res, next) => {
 });
 
 // User routes - for property owners to submit verification
-router.post('/submit', requireRole(['owner']), rateLimitVerification, submitIdentityVerification);
-router.post('/simple', requireRole(['owner']), rateLimitVerification, submitSimpleVerification);
+// Note: Allow any authenticated user to submit verification, they will become owners after verification
+router.post('/submit', rateLimitVerification, submitIdentityVerification);
+router.post('/simple', rateLimitVerification, submitSimpleVerification);
 router.get('/status', getVerificationStatus);
 router.post('/verify-fingerprint', verifyFingerprint);
 router.post('/upload-documents', requireRole(['owner']), uploadDocuments);

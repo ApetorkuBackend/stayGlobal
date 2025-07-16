@@ -100,7 +100,7 @@ export const submitSimpleVerification = async (req: Request, res: Response): Pro
 
     await verification.save();
 
-    // Update User model with verification status for persistence
+    // Update User model with verification status and set role to owner
     await User.findOneAndUpdate(
       { clerkId: userId },
       {
@@ -108,7 +108,8 @@ export const submitSimpleVerification = async (req: Request, res: Response): Pro
           'identityVerification.isVerified': true,
           'identityVerification.verificationLevel': 'fully_verified',
           'identityVerification.verifiedAt': new Date(),
-          'identityVerification.verificationId': verification._id
+          'identityVerification.verificationId': verification._id,
+          'role': 'owner' // Automatically set role to owner after verification
         }
       },
       { upsert: true }
@@ -261,7 +262,8 @@ export const submitIdentityVerification = async (req: Request, res: Response): P
           'identityVerification.isVerified': true,
           'identityVerification.verifiedAt': new Date(),
           'identityVerification.verificationLevel': 'fully_verified',
-          'paymentAccount': paymentAccount || null
+          'paymentAccount': paymentAccount || null,
+          'role': 'owner' // Automatically set role to owner after verification
         },
         { new: true } // Return the updated document
       );
@@ -325,7 +327,8 @@ export const submitIdentityVerification = async (req: Request, res: Response): P
       {
         'identityVerification.isVerified': true,
         'identityVerification.verifiedAt': new Date(),
-        'identityVerification.verificationLevel': 'fully_verified'
+        'identityVerification.verificationLevel': 'fully_verified',
+        'role': 'owner' // Automatically set role to owner after verification
       }
     );
 
@@ -577,7 +580,8 @@ export const adminApproveVerification = async (req: Request, res: Response): Pro
       {
         'identityVerification.isVerified': true,
         'identityVerification.verifiedAt': new Date(),
-        'identityVerification.verificationLevel': 'fully_verified'
+        'identityVerification.verificationLevel': 'fully_verified',
+        'role': 'owner' // Automatically set role to owner after verification
       }
     );
 

@@ -131,7 +131,10 @@ router.post('/sync', async (req, res): Promise<void> => {
 
     if (!clerkUserId) {
       console.log('❌ No clerkUserId provided');
-      res.status(400).json({ error: 'Clerk user ID is required' });
+      res.status(400).json({
+        error: 'Clerk user ID is required',
+        message: 'Please provide a valid Clerk user ID'
+      });
       return;
     }
 
@@ -139,13 +142,47 @@ router.post('/sync', async (req, res): Promise<void> => {
     const user = await syncUserWithClerk(clerkUserId);
     console.log('✅ User synced successfully:', user._id);
 
-    res.json({
+    res.status(200).json({
       message: 'User synced successfully',
-      user
+      user: {
+        _id: user._id,
+        clerkId: user.clerkId,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
     });
   } catch (error) {
     console.error('❌ Error syncing user:', error);
-    res.status(500).json({ error: 'Failed to sync user' });
+
+    // Provide more specific error messages
+    if (error instanceof Error) {
+      if (error.message.includes('User not found')) {
+        res.status(404).json({
+          error: 'User not found in Clerk',
+          message: 'The provided user ID does not exist in Clerk'
+        });
+      } else if (error.message.includes('email')) {
+        res.status(400).json({
+          error: 'Invalid user data',
+          message: 'User email is required but not found'
+        });
+      } else {
+        res.status(500).json({
+          error: 'Failed to sync user',
+          message: error.message
+        });
+      }
+    } else {
+      res.status(500).json({
+        error: 'Failed to sync user',
+        message: 'An unexpected error occurred'
+      });
+    }
   }
 });
 

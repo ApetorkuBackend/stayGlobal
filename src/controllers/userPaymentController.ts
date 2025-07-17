@@ -300,14 +300,14 @@ export const getBanks = async (req: Request, res: Response): Promise<void> => {
           // Log first few banks to see the structure
           if (banksResponse.data.length > 0) {
             console.log('🔍 Sample bank structure:', JSON.stringify(banksResponse.data[0], null, 2));
-            console.log('🔍 First 10 bank names:', banksResponse.data.slice(0, 10).map(b => `${b.name} (${b.code})`));
+            console.log('🔍 First 10 bank names:', banksResponse.data.slice(0, 10).map((b: any) => `${b.name} (${b.code})`));
           }
 
           // Debug: Check for actual Ghana banks by country
           const actualGhanaBanks = banksResponse.data.filter((bank: any) =>
             bank.country && bank.country.toLowerCase() === 'ghana'
           );
-          console.log('🇬🇭 ACTUAL GHANA BANKS (by country):', actualGhanaBanks.map(b => ({
+          console.log('🇬🇭 ACTUAL GHANA BANKS (by country):', actualGhanaBanks.map((b: any) => ({
             name: b.name,
             code: b.code,
             country: b.country,
@@ -319,7 +319,7 @@ export const getBanks = async (req: Request, res: Response): Promise<void> => {
           const ghanaNameBanks = banksResponse.data.filter((bank: any) =>
             bank.name && bank.name.toLowerCase().includes('ghana')
           );
-          console.log('🔍 BANKS WITH "GHANA" IN NAME:', ghanaNameBanks.map(b => ({
+          console.log('🔍 BANKS WITH "GHANA" IN NAME:', ghanaNameBanks.map((b: any) => ({
             name: b.name,
             code: b.code,
             country: b.country,
@@ -343,14 +343,14 @@ export const getBanks = async (req: Request, res: Response): Promise<void> => {
 
           console.log(`✅ Retrieved ${ghanaianBanks.length} Ghanaian banks from Paystack`);
           if (ghanaianBanks.length > 0) {
-            console.log('🏦 Found Ghana banks:', ghanaianBanks.slice(0, 10).map(b => `${b.name} (${b.code})`));
+            console.log('🏦 Found Ghana banks:', ghanaianBanks.slice(0, 10).map((b: any) => `${b.name} (${b.code})`));
             res.json({ banks: ghanaianBanks });
             return;
           } else {
             console.log('⚠️ No Ghanaian banks found in Paystack response');
             // Log some bank names to see what's available
             console.log('🔍 Available bank names (first 20):',
-              banksResponse.data.slice(0, 20).map(b => `${b.name} (${b.code})`)
+              banksResponse.data.slice(0, 20).map((b: any) => `${b.name} (${b.code})`)
             );
           }
         }

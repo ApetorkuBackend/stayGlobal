@@ -37,15 +37,24 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
 
     // Check if owner has payment account set up
     if (!owner.paymentAccount || !owner.paymentAccount.isVerified) {
-      res.status(400).json({ 
-        error: 'Owner has not set up payment account. Please contact the property owner.' 
+      res.status(400).json({
+        error: 'Owner has not set up payment account. Please contact the property owner.'
       });
       return;
     }
 
-    // Calculate fees
+    // Ensure apartment has payment account details (use apartment's stored payment info for consistency)
+    if (paymentMethod === 'paystack' && !apartment.ownerPaymentAccount?.subaccountCode) {
+      res.status(400).json({
+        error: 'Apartment payment configuration missing',
+        message: 'This apartment was not properly configured for payments. Please contact the owner.'
+      });
+      return;
+    }
+
+    // Calculate fees (10% platform fee, 90% to owner)
     const totalAmount = booking.totalAmount;
-    const platformFee = paystackService.calculatePlatformFee(totalAmount);
+    const platformFee = paystackService.calculatePlatformFee(totalAmount, 10); // 10% platform fee
     const ownerAmount = paystackService.calculateOwnerAmount(totalAmount, platformFee);
 
     // Create payment record
@@ -82,12 +91,24 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
           paymentId: (payment._id as any).toString(),
           apartmentTitle: apartment.title,
           checkIn: booking.checkIn,
-          checkOut: booking.checkOut
+          checkOut: booking.checkOut,
+          ownerId: apartment.ownerId,
+          ownerEmail: apartment.ownerEmail,
+          platformFee: platformFee,
+          ownerAmount: ownerAmount
         },
-        subaccount: owner.paymentAccount.accountDetails.subaccountCode,
+        subaccount: apartment.ownerPaymentAccount.subaccountCode,
         transaction_charge: paystackService.convertToKobo(platformFee),
         bearer: 'subaccount' as const
       };
+
+      console.log('💳 Initializing split payment:', {
+        totalAmount: totalAmount,
+        platformFee: platformFee,
+        ownerAmount: ownerAmount,
+        subaccountCode: apartment.ownerPaymentAccount.subaccountCode,
+        transactionCharge: paystackService.convertToKobo(platformFee)
+      });
 
       const paystackResponse = await paystackService.initializeTransaction(paystackData);
 
@@ -98,7 +119,7 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
 
       // Update payment with Paystack details
       payment.paystackReference = reference;
-      payment.paystackSubaccountCode = owner.paymentAccount.accountDetails.subaccountCode;
+      payment.paystackSubaccountCode = apartment.ownerPaymentAccount.subaccountCode;
       payment.status = 'pending';
 
       await payment.save();
@@ -118,7 +139,7 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
           email: user.email,
           amount: amountInKobo,
           metadata: paystackData.metadata,
-          subaccount: owner.paymentAccount.accountDetails.subaccountCode,
+          subaccount: apartment.ownerPaymentAccount.subaccountCode,
           transaction_charge: paystackService.convertToKobo(platformFee),
           bearer: 'subaccount'
         }
@@ -149,12 +170,24 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
           checkIn: booking.checkIn,
           checkOut: booking.checkOut,
           mobile_money_number: booking.paymentDetails.momoNumber,
-          mobile_money_provider: booking.paymentDetails.momoProvider.toUpperCase()
+          mobile_money_provider: booking.paymentDetails.momoProvider.toUpperCase(),
+          ownerId: apartment.ownerId,
+          ownerEmail: apartment.ownerEmail,
+          platformFee: platformFee,
+          ownerAmount: ownerAmount
         },
-        subaccount: owner.paymentAccount.accountDetails.subaccountCode,
+        subaccount: apartment.ownerPaymentAccount.subaccountCode,
         transaction_charge: paystackService.convertToKobo(platformFee),
         bearer: 'subaccount' as const
       };
+
+      console.log('📱 Initializing mobile money split payment:', {
+        totalAmount: totalAmount,
+        platformFee: platformFee,
+        ownerAmount: ownerAmount,
+        subaccountCode: apartment.ownerPaymentAccount.subaccountCode,
+        momoProvider: booking.paymentDetails.momoProvider
+      });
 
       // Use mobile money charge API to send USSD prompt to user's phone
       const momoResponse = await paystackService.chargeMobileMoney(momoChargeData);
@@ -166,7 +199,7 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
 
       // Update payment with Paystack details
       payment.paystackReference = reference;
-      payment.paystackSubaccountCode = owner.paymentAccount.accountDetails.subaccountCode;
+      payment.paystackSubaccountCode = apartment.ownerPaymentAccount.subaccountCode;
       payment.status = 'pending';
 
       await payment.save();
@@ -229,6 +262,14 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       payment.completedAt = new Date();
       await payment.save();
 
+      console.log('✅ Payment verified successfully:', {
+        reference: reference,
+        amount: verification.data.amount,
+        subaccount: verification.data.subaccount,
+        platformFee: payment.platformFee,
+        ownerAmount: payment.ownerAmount
+      });
+
       // Handle booking creation or update
       let booking = null;
 
@@ -238,8 +279,44 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         if (booking) {
           booking.paymentStatus = 'paid';
           booking.bookingStatus = 'confirmed';
+          booking.paystackReference = reference;
           await booking.save();
           console.log('✅ Updated existing booking:', booking._id);
+
+          // Create commission record for admin tracking
+          try {
+            const Commission = require('../models/Commission').default;
+            const User = require('../models/User').default;
+
+            // Find owner and guest users by clerkId
+            const ownerUser = await User.findOne({ clerkId: payment.payeeId });
+            const guestUser = await User.findOne({ clerkId: payment.payerId });
+
+            if (ownerUser && guestUser) {
+              const commissionRate = 0.05; // 5%
+              const commissionAmount = payment.amount * commissionRate;
+
+              await Commission.create({
+                bookingId: booking._id,
+                apartmentId: booking.apartmentId,
+                ownerId: ownerUser._id, // Use MongoDB ObjectId
+                guestId: guestUser._id, // Use MongoDB ObjectId
+                roomPrice: payment.amount,
+                commissionRate,
+                commissionAmount,
+                bookingDate: booking.createdAt,
+                checkInDate: booking.checkIn,
+                checkOutDate: booking.checkOut,
+                paymentReference: reference,
+                status: 'paid'
+              });
+              console.log('✅ Commission record created:', commissionAmount);
+            } else {
+              console.error('❌ Could not find owner or guest user for commission creation');
+            }
+          } catch (commissionError) {
+            console.error('⚠️ Failed to create commission record:', commissionError);
+          }
         }
       } else if (payment.metadata && (payment.metadata as PaymentMetadata).apartmentId) {
         // Create booking from payment metadata (payment-first flow)
@@ -366,11 +443,86 @@ export const verifySplitPayment = async (req: Request, res: Response): Promise<v
     console.log('✅ Payment verified successfully:', {
       reference: paymentData.reference,
       amount: paymentData.amount,
-      status: paymentData.status
+      status: paymentData.status,
+      metadata: paymentData.metadata
     });
 
+    // Check if this is an account setup payment
+    if (paymentData.metadata?.type === 'account_setup') {
+      console.log('🔧 Processing account setup payment');
+
+      const userId = paymentData.metadata.userId;
+      const businessName = paymentData.metadata.businessName;
+      const description = paymentData.metadata.description || '';
+
+      // Find user and set up their payment account
+      const User = require('../models/User').default;
+      const user = await User.findOne({ clerkId: userId });
+
+      if (user) {
+        // Create Paystack subaccount for the user
+        const subaccountData = {
+          business_name: businessName,
+          settlement_bank: '044', // Default bank code
+          account_number: '0000000000', // Placeholder - will be updated when user provides real details
+          percentage_charge: 10, // 10% platform commission
+          description: description || `Payment account for ${businessName}`,
+          primary_contact_email: user.email,
+          primary_contact_name: user.fullName || user.firstName,
+          primary_contact_phone: user.phoneNumber || '',
+          metadata: {
+            userId: user.clerkId,
+            setupReference: reference
+          }
+        };
+
+        try {
+          const subaccountResponse = await paystackService.createSubaccount(subaccountData);
+
+          // Update user's payment account
+          user.paymentAccount = {
+            provider: 'paystack',
+            accountDetails: {
+              subaccountCode: subaccountResponse.data.subaccount_code,
+              businessName: businessName,
+              description: description
+            },
+            isVerified: true,
+            createdAt: new Date()
+          };
+
+          // Update user role to owner if not already
+          if (user.role !== 'owner') {
+            user.role = 'owner';
+          }
+
+          await user.save();
+
+          console.log('✅ Payment account created for user:', userId);
+          console.log('✅ Subaccount code:', subaccountResponse.data.subaccount_code);
+        } catch (subaccountError) {
+          console.error('❌ Error creating subaccount:', subaccountError);
+          // Continue with basic account setup even if subaccount creation fails
+          user.paymentAccount = {
+            provider: 'paystack',
+            accountDetails: {
+              businessName: businessName,
+              description: description
+            },
+            isVerified: true,
+            createdAt: new Date()
+          };
+
+          if (user.role !== 'owner') {
+            user.role = 'owner';
+          }
+
+          await user.save();
+        }
+      }
+    }
     // If bookingId is provided, update the booking status
-    if (bookingId) {
+    else if (bookingId) {
       const booking = await Booking.findById(bookingId);
       if (booking) {
         booking.paymentStatus = 'paid';
@@ -382,21 +534,35 @@ export const verifySplitPayment = async (req: Request, res: Response): Promise<v
 
         // Create commission record for admin
         const totalAmountInGHS = paymentData.amount / 100; // Convert from kobo to GHS
-        const commissionAmount = totalAmountInGHS * 0.10; // 10% commission
+        const commissionRate = 0.05; // 5% commission
+        const commissionAmount = totalAmountInGHS * commissionRate;
 
         const Commission = require('../models/Commission').default;
-        await Commission.create({
-          bookingId: booking._id,
-          apartmentId: booking.apartmentId,
-          ownerId: booking.ownerId,
-          amount: commissionAmount,
-          percentage: 10,
-          status: 'earned',
-          paymentReference: reference,
-          createdAt: new Date()
-        });
+        const User = require('../models/User').default;
 
-        console.log('✅ Commission created:', commissionAmount);
+        // Find owner and guest users by clerkId
+        const ownerUser = await User.findOne({ clerkId: booking.ownerId });
+        const guestUser = await User.findOne({ clerkId: booking.guestId });
+
+        if (ownerUser && guestUser) {
+          await Commission.create({
+            bookingId: booking._id,
+            apartmentId: booking.apartmentId,
+            ownerId: ownerUser._id, // Use MongoDB ObjectId
+            guestId: guestUser._id, // Use MongoDB ObjectId
+            roomPrice: totalAmountInGHS,
+            commissionRate,
+            commissionAmount,
+            bookingDate: booking.createdAt,
+            checkInDate: booking.checkIn,
+            checkOutDate: booking.checkOut,
+            paymentReference: reference,
+            status: 'paid'
+          });
+          console.log('✅ Commission created:', commissionAmount);
+        } else {
+          console.error('❌ Could not find owner or guest user for commission creation');
+        }
       }
     }
 

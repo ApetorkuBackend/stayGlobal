@@ -123,8 +123,18 @@ router.post('/resolve-account', async (req: Request, res: Response): Promise<voi
   }
 });
 
-// Create subaccount for owner (owners only)
+// Redirect to the correct endpoint for subaccount creation
 router.post('/create-subaccount', requireRole(['owner']), async (req: Request, res: Response): Promise<void> => {
+  res.status(301).json({
+    status: false,
+    error: 'This endpoint has been moved',
+    message: 'Please use /api/user-payments/account/paystack for payment account setup',
+    redirectTo: '/api/user-payments/account/paystack'
+  });
+});
+
+// DEPRECATED: Old subaccount creation logic - kept for reference
+router.post('/create-subaccount-deprecated', requireRole(['owner']), async (req: Request, res: Response): Promise<void> => {
   try {
     const { businessName, bankCode, accountNumber } = req.body;
     const userId = (req as any).user.clerkId;

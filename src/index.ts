@@ -19,6 +19,7 @@ app.use(cors({
     process.env.FRONTEND_URL || 'http://localhost:5173',
     'http://localhost:8080',
     'http://localhost:8081',
+    'http://localhost:8082',  // Add port 8082 for frontend
     'https://stayglobal.vercel.app',
     'https://stay-global.vercel.app',
     'https://stayglobal-git-main-apetorkus-projects.vercel.app',
@@ -74,7 +75,11 @@ app.use('/api/bookings', (req, res, next) => {
 }, bookingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/api/user-payments', userPaymentRoutes);
+app.use('/api/user-payments', (req, res, next) => {
+  console.log(`💳 User Payment route hit: ${req.method} ${req.path}`);
+  console.log('🔐 Authorization header:', req.headers.authorization ? 'Present' : 'Missing');
+  next();
+}, userPaymentRoutes);
 app.use('/api/paystack', paystackRoutes);
 app.use('/api/identity-verification', identityVerificationRoutes);
 app.use('/api/notifications', notificationRoutes);

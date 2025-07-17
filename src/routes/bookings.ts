@@ -2,6 +2,7 @@ import express from 'express';
 import {
   createBooking,
   createSecureBooking,
+  createBookingForPayment,
   getMyBookings,
   getOwnerBookings,
   getBookingById,

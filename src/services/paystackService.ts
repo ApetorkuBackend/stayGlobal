@@ -296,6 +296,7 @@ class PaystackService {
     amount: number; // in kobo
     subaccount: string;
     metadata?: any;
+    reference?: string;
   }) {
     try {
       console.log('💳 Initializing split payment:', data);
@@ -303,9 +304,10 @@ class PaystackService {
       const paymentData = {
         email: data.email,
         amount: data.amount,
+        reference: data.reference || this.generateReference(),
         subaccount: data.subaccount,
         transaction_charge: Math.round(data.amount * 0.10), // 10% platform fee
-        bearer: 'account', // Main account bears the transaction fee
+        bearer: 'subaccount', // Subaccount bears the transaction fee
         metadata: data.metadata || {}
       };
 

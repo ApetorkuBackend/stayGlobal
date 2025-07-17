@@ -732,3 +732,38 @@ export const migrateCommissions = async (req: Request, res: Response) => {
     });
   }
 };
+
+// New function to recalculate all commission stats
+export const recalculateCommissions = async (req: Request, res: Response) => {
+  try {
+    console.log('🔄 Recalculating commission statistics...');
+
+    // Get all commission records
+    const commissions = await Commission.find({});
+    console.log(`📊 Found ${commissions.length} commission records`);
+
+    // Calculate totals
+    const totalCommission = commissions.reduce((sum, c) => sum + c.commissionAmount, 0);
+    const paidCommission = commissions.filter(c => c.status === 'paid').reduce((sum, c) => sum + c.commissionAmount, 0);
+    const pendingCommission = commissions.filter(c => c.status === 'pending').reduce((sum, c) => sum + c.commissionAmount, 0);
+
+    console.log('📊 Commission Statistics:');
+    console.log(`   Total Commission: GHS ${totalCommission.toFixed(2)}`);
+    console.log(`   Paid Commission: GHS ${paidCommission.toFixed(2)}`);
+    console.log(`   Pending Commission: GHS ${pendingCommission.toFixed(2)}`);
+
+    res.json({
+      message: 'Commission statistics recalculated',
+      statistics: {
+        totalCommission,
+        paidCommission,
+        pendingCommission,
+        totalRecords: commissions.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error recalculating commissions:', error);
+    res.status(500).json({ error: 'Failed to recalculate commissions' });
+  }
+};

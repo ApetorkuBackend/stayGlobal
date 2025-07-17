@@ -6,7 +6,8 @@ import {
   getPaymentAccount,
   getBanks,
   verifyAccountNumber,
-  removePaymentAccount
+  removePaymentAccount,
+  initializeAccountSetup
 } from '../controllers/userPaymentController';
 
 const router = express.Router();
@@ -17,8 +18,21 @@ router.get('/banks', getBanks);
 // Verify account number (public endpoint for payment setup)
 router.post('/verify-account', verifyAccountNumber);
 
+// Test endpoint to check Paystack configuration
+router.get('/test-config', (req, res) => {
+  res.json({
+    paystackConfigured: !!process.env.PAYSTACK_SECRET_KEY,
+    paystackKeyLength: process.env.PAYSTACK_SECRET_KEY?.length || 0,
+    paystackKeyPrefix: process.env.PAYSTACK_SECRET_KEY?.substring(0, 7) || 'none',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // All other routes require authentication
 router.use(requireAuth);
+
+// Initialize account setup with inline payment
+router.post('/initialize-account-setup', initializeAccountSetup);
 
 // Get user's payment account
 router.get('/account', getPaymentAccount);

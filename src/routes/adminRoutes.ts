@@ -10,7 +10,8 @@ import {
   getAllOwners,
   updateOwnerStatus,
   updateApartmentPaymentAccounts,
-  migrateCommissions
+  migrateCommissions,
+  recalculateCommissions
 } from '../controllers/adminController';
 
 const router = express.Router();
@@ -358,6 +359,7 @@ router.get('/stats', getAdminStats);
 // Commission management
 router.get('/commissions', getCommissions as any);
 router.patch('/commissions/:commissionId/status', updateCommissionStatus as any);
+router.post('/commissions/recalculate', recalculateCommissions as any);
 
 // Apartment management
 router.get('/apartments', getAllApartments as any);

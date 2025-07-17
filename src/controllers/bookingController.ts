@@ -400,43 +400,53 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       // Don't fail the booking creation if chat creation fails
     }
 
-    // Create commission record for bookings with successful payments
-    // Accept both 'completed' and 'paid' status, and create commission even without payment reference for tracking
-    const shouldCreateCommission = paymentStatus === 'completed' || paymentStatus === 'paid';
-
-    if (shouldCreateCommission && totalAmount > 0) {
+    // Create commission record for ALL bookings with amount > 0
+    // This ensures we track all revenue regardless of payment method
+    if (totalAmount > 0) {
       try {
-        const commissionRate = 0.05; // 5%
-        const commissionAmount = totalAmount * commissionRate;
+        // Find the owner and guest User records by clerkId
+        const ownerUser = await User.findOne({ clerkId: apartment.ownerId });
+        const guestUser = await User.findOne({ clerkId: booking.guestId });
 
-        const commission = new Commission({
-          bookingId: booking._id,
-          apartmentId: booking.apartmentId,
-          ownerId: apartment.ownerId,
-          guestId: booking.guestId,
-          roomPrice: totalAmount,
-          commissionRate,
-          commissionAmount,
-          bookingDate: booking.createdAt,
-          checkInDate: booking.checkIn,
-          checkOutDate: booking.checkOut,
-          paymentReference: paymentReference || `booking_${booking._id}`, // Use booking ID if no payment reference
-          status: paymentReference ? 'pending' : 'manual_review' // Different status for bookings without payment reference
-        });
+        if (!ownerUser) {
+          console.error(`❌ Owner user not found for clerkId: ${apartment.ownerId}`);
+        }
+        if (!guestUser) {
+          console.error(`❌ Guest user not found for clerkId: ${booking.guestId}`);
+        }
 
-        await commission.save();
-        console.log(`💰 Commission created for ${paymentStatus} booking: GHS ${commissionAmount.toFixed(2)} (5% of GHS ${totalAmount})`);
-        console.log(`💳 Payment reference: ${paymentReference || 'booking_' + booking._id}`);
-        console.log(`📊 Commission status: ${commission.status}`);
+        if (ownerUser && guestUser) {
+          const commissionRate = 0.05; // 5%
+          const commissionAmount = totalAmount * commissionRate;
+
+          const commission = new Commission({
+            bookingId: booking._id,
+            apartmentId: booking.apartmentId,
+            ownerId: ownerUser._id, // Use MongoDB ObjectId
+            guestId: guestUser._id, // Use MongoDB ObjectId
+            roomPrice: totalAmount,
+            commissionRate,
+            commissionAmount,
+            bookingDate: booking.createdAt,
+            checkInDate: booking.checkIn,
+            checkOutDate: booking.checkOut,
+            paymentReference: paymentReference || `booking_${booking._id}`,
+            status: (paymentStatus === 'completed' || paymentStatus === 'paid') ? 'paid' : 'pending'
+          });
+
+          await commission.save();
+          console.log(`💰 Commission created for booking: GHS ${commissionAmount.toFixed(2)} (5% of GHS ${totalAmount})`);
+          console.log(`👤 Owner: ${ownerUser.firstName} ${ownerUser.lastName} (${ownerUser._id})`);
+          console.log(`👤 Guest: ${guestUser.firstName} ${guestUser.lastName} (${guestUser._id})`);
+          console.log(`💳 Payment reference: ${paymentReference || 'booking_' + booking._id}`);
+          console.log(`📊 Commission status: ${commission.status}`);
+        }
       } catch (error) {
         console.error('⚠️ Failed to create commission record:', error);
         // Don't fail the booking creation if commission creation fails
       }
     } else {
-      console.log('ℹ️ No commission created - booking has no payment or amount is 0');
-      console.log(`   Payment Status: ${paymentStatus || 'none'}`);
-      console.log(`   Payment Reference: ${paymentReference || 'none'}`);
-      console.log(`   Total Amount: ${totalAmount || 0}`);
+      console.log('ℹ️ No commission created - booking amount is 0');
     }
 
     res.status(201).json({
@@ -1227,5 +1237,122 @@ export const selfCheckout = async (req: Request, res: Response): Promise<void> =
   } catch (error) {
     console.error('❌ Error during self-checkout:', error);
     res.status(500).json({ error: 'Failed to process checkout' });
+  }
+};
+
+// Create booking for payment flow (simplified)
+export const createBookingForPayment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { apartmentId, checkIn, checkOut, guests, paymentMethod, specialRequests } = req.body;
+
+    // Validate required fields
+    if (!apartmentId || !checkIn || !checkOut || !guests || !paymentMethod) {
+      res.status(400).json({
+        error: 'Missing required fields',
+        required: ['apartmentId', 'checkIn', 'checkOut', 'guests', 'paymentMethod']
+      });
+      return;
+    }
+
+    // Get user info
+    const user = await syncUserWithClerk(req.user.clerkId);
+
+    // Get apartment details
+    const apartment = await Apartment.findById(apartmentId);
+    if (!apartment) {
+      res.status(404).json({ error: 'Apartment not found' });
+      return;
+    }
+
+    // Validate apartment has payment account configured
+    if (!apartment.ownerPaymentAccount?.provider) {
+      res.status(400).json({
+        error: 'Apartment payment not configured',
+        message: 'This apartment is not set up to receive payments. Please contact the owner.'
+      });
+      return;
+    }
+
+    // Validate dates
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    const now = new Date();
+
+    if (checkInDate <= now) {
+      res.status(400).json({ error: 'Check-in date must be in the future' });
+      return;
+    }
+
+    if (checkOutDate <= checkInDate) {
+      res.status(400).json({ error: 'Check-out date must be after check-in date' });
+      return;
+    }
+
+    // Check room availability
+    if (apartment.availableRooms <= 0) {
+      res.status(400).json({ error: 'No rooms available for the selected dates' });
+      return;
+    }
+
+    // Calculate total amount
+    const days = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
+    const totalAmount = days * apartment.price;
+
+    // Generate unique ticket code
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substr(2, 6).toUpperCase();
+    const ticketCode = `BK${timestamp}${randomStr}`;
+
+    // Create booking (status pending until payment is confirmed)
+    const booking = new Booking({
+      apartmentId,
+      guestId: user.clerkId,
+      guestName: user.fullName || `${user.firstName} ${user.lastName}`,
+      guestEmail: user.email,
+      guestPhone: user.phone || '',
+      checkIn: checkInDate,
+      checkOut: checkOutDate,
+      guests,
+      totalAmount,
+      paymentMethod,
+      paymentStatus: 'pending',
+      bookingStatus: 'confirmed', // Will be updated to confirmed after payment
+      ticketCode,
+      specialRequests,
+      ownerId: apartment.ownerId
+    });
+
+    await booking.save();
+
+    console.log('✅ Booking created for payment:', {
+      bookingId: booking._id,
+      totalAmount: totalAmount,
+      apartmentTitle: apartment.title,
+      ownerPaymentAccount: apartment.ownerPaymentAccount.provider
+    });
+
+    res.status(201).json({
+      message: 'Booking created successfully',
+      booking: {
+        id: booking._id,
+        apartmentId: booking.apartmentId,
+        checkIn: booking.checkIn,
+        checkOut: booking.checkOut,
+        totalAmount: booking.totalAmount,
+        ticketCode: booking.ticketCode,
+        paymentMethod: booking.paymentMethod,
+        paymentStatus: booking.paymentStatus,
+        bookingStatus: booking.bookingStatus
+      },
+      paymentInfo: {
+        ownerPaymentAccount: apartment.ownerPaymentAccount,
+        totalAmount: totalAmount,
+        currency: 'GHS'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating booking for payment:', error);
+    res.status(500).json({ error: 'Failed to create booking' });
   }
 };
